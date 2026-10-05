@@ -204,29 +204,72 @@ test_database_connection() {
     print_header "Step 5: Testing Database Connection"
 
     # Extract DB credentials from .env
+    local db_connection=$(grep "^DB_CONNECTION=" "$ENV_FILE" |cut -d '=' -f 2 | tr -d '\r')
     local db_host=$(grep "^DB_HOST=" "$ENV_FILE" | cut -d '=' -f 2 | tr -d '\r')
     local db_port=$(grep "^DB_PORT=" "$ENV_FILE" | cut -d '=' -f 2 | tr -d '\r')
     local db_name=$(grep "^DB_DATABASE=" "$ENV_FILE" | cut -d '=' -f 2 | tr -d '\r')
     local db_user=$(grep "^DB_USERNAME=" "$ENV_FILE" | cut -d '=' -f 2 | tr -d '\r')
     local db_pass=$(grep "^DB_PASSWORD=" "$ENV_FILE" | cut -d '=' -f 2 | tr -d '\r')
 
+    # Default to pgsql or mysql if not specified
+        db_connection=${db_connection:-pgsql}
+
+    # Map Laravel driver name to PDO driver name & default port if empty
+    local pdo_driver="$db_connection"
+    if [ "$db_connection" = "pgsql" ] || [ "$db_connection" = "postgres" ] || [ "$db_connection" = "postgresql" ]; then
+        pdo_driver="pgsql"
+        db_port=${db_port:-5432}
+    elif [ "$db_connection" = "mysql" ]; then
+        pdo_driver="mysql"
+        db_port=${db_port:-3306}
+    fi
+
     print_info "Connecting to database..."
+    print_info "Connection: $db_connection"
     print_info "Host: $db_host:$db_port"
     print_info "Database: $db_name"
     print_info "User: $db_user"
 
     # Try to connect using PHP
+    # if php -r "
+    #     \$dsn = 'mysql:host=$db_host;port=$db_port';
+    #     \$pdo = new PDO(\$dsn, '$db_user', '$db_pass');
+    #     echo 'connected';
+    # " 2>/dev/null | grep -q "connected"; then
+    #     print_success "Database connection successful"
+    # else
+    #     print_error "Failed to connect to database"
+    #     print_error "Please verify your database credentials in .env file"
+    #     exit 1
+    # fi
+    #
     if php -r "
-        \$dsn = 'mysql:host=$db_host;port=$db_port';
-        \$pdo = new PDO(\$dsn, '$db_user', '$db_pass');
-        echo 'connected';
-    " 2>/dev/null | grep -q "connected"; then
-        print_success "Database connection successful"
-    else
-        print_error "Failed to connect to database"
-        print_error "Please verify your database credentials in .env file"
-        exit 1
-    fi
+           \$driver = '$pdo_driver';
+           \$host = '$db_host';
+           \$port = '$db_port';
+           \$dbname = '$db_name';
+           \$user = '$db_user';
+           \$pass = '$db_pass';
+
+           if (\$driver === 'pgsql') {
+               \$dsn = \"pgsql:host=\$host;port=\$port;dbname=\$dbname\";
+           } else {
+               \$dsn = \"mysql:host=\$host;port=\$port;dbname=\$dbname\";
+           }
+
+           try {
+               \$pdo = new PDO(\$dsn, \$user, \$pass, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+               echo 'connected';
+           } catch (Exception \$e) {
+               exit(1);
+           }
+       " 2>/dev/null | grep -q "connected"; then
+           print_success "Database connection successful"
+       else
+           print_error "Failed to connect to database"
+           print_error "Please verify your database credentials in .env file"
+           exit 1
+       fi
 }
 
 #############################################################################
